@@ -14,7 +14,7 @@ import requests
 # SETTINGS
 # -----------------------------
 
-GEMINI_MODEL = "gemini-3.8-flash"
+GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 
@@ -89,7 +89,7 @@ def search_images(history):
             "gsrnamespace": 6,
             "gsrlimit": 20,
             "prop": "imageinfo",
-            "iiprop": "url|extmetadata",
+            "iiprop": "url|mime|size|extmetadata",
             "iiurlwidth": 1200,
             "iiextmetadatafilter": (
                 "Artist|Credit|LicenseShortName|LicenseUrl|ImageDescription"
