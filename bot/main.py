@@ -352,15 +352,41 @@ def select_with_ai(candidates, api_key):
         }
     }
 
-    response = requests.post(
-        GEMINI_API,
-        headers={
-            "x-goog-api-key": api_key,
-            "Content-Type": "application/json"
-        },
-        json=payload,
-        timeout=90
-    )
+    
+    response = None
+
+    for attempt in range(3):
+        try:
+            response = requests.post(
+                GEMINI_API,
+                headers={
+                    "x-goog-api-key": api_key,
+                    "Content-Type": "application/json"
+                },
+                json=payload,
+                timeout=(20, 180)
+            )
+            break
+
+        except (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError
+        ) as error:
+
+            if attempt == 2:
+                raise RuntimeError(
+                    f"Gemini request failed after 3 attempts: {error}"
+                ) from error
+
+            wait = 15 * (attempt + 1)
+
+            print(
+                f"Gemini timeout or connection error. "
+                f"Retrying in {wait} seconds..."
+            )
+
+            time.sleep(wait)
+
 
     if not response.ok:
         print("Gemini request URL:", GEMINI_API)
