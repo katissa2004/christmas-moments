@@ -45,7 +45,7 @@ SEARCH_QUERIES = [
     "Christmas market winter lights"
 ]
 
-MAX_CANDIDATES = 3
+MAX_CANDIDATES = 2
 
 
 # -----------------------------
@@ -64,7 +64,7 @@ def load_history():
 
 
 def save_history(history):
-    with open(HISTORY_FILE, "w", encoding="utf-8") as file:
+    with open("history.json", "w", encoding="utf-8") as file:
         json.dump(
             history[-200:],
             file,
@@ -190,7 +190,14 @@ def search_images(history):
 
     print(f"Found {len(candidates)} unique candidates.")
 
-    return candidates[:MAX_CANDIDATES]
+    selected_candidates = candidates[:MAX_CANDIDATES]
+
+    print(
+        f"Selected {len(selected_candidates)} candidates "
+        f"for Gemini."
+    )
+
+    return selected_candidates
 
 
 # -----------------------------
@@ -348,15 +355,23 @@ def select_with_ai(candidates, api_key):
             }
         ],
         "generationConfig": {
+            "temperature": 0.2,
             "maxOutputTokens": 30
         }
     }
 
-    
     response = None
 
-    for attempt in range(3):
+    retryable_statuses = (429, 500, 502, 503, 504)
+
+    for attempt in range(4):
+
         try:
+            print(
+                f"Sending request to Gemini "
+                f"(attempt {attempt + 1}/4)..."
+            )
+
             response = requests.post(
                 GEMINI_API,
                 headers={
@@ -364,8 +379,24 @@ def select_with_ai(candidates, api_key):
                     "Content-Type": "application/json"
                 },
                 json=payload,
-                timeout=(20, 180)
+                timeout=(20, 120)
             )
+
+            if response.status_code in retryable_statuses:
+
+                if attempt == 3:
+                    break
+
+                wait = 10 * (2 ** attempt)
+
+                print(
+                    f"Gemini returned HTTP {response.status_code}. "
+                    f"Retrying in {wait} seconds..."
+                )
+
+                time.sleep(wait)
+                continue
+
             break
 
         except (
@@ -373,20 +404,24 @@ def select_with_ai(candidates, api_key):
             requests.exceptions.ConnectionError
         ) as error:
 
-            if attempt == 2:
+            if attempt == 3:
                 raise RuntimeError(
-                    f"Gemini request failed after 3 attempts: {error}"
+                    f"Gemini request failed after 4 attempts: {error}"
                 ) from error
 
-            wait = 15 * (attempt + 1)
+            wait = 10 * (2 ** attempt)
 
             print(
-                f"Gemini timeout or connection error. "
+                f"Gemini connection error: {error}. "
                 f"Retrying in {wait} seconds..."
             )
 
             time.sleep(wait)
 
+    if response is None:
+        raise RuntimeError(
+            "Gemini did not return a response."
+        )
 
     if not response.ok:
         print("Gemini request URL:", GEMINI_API)
@@ -405,6 +440,7 @@ def select_with_ai(candidates, api_key):
         )
     except (KeyError, IndexError, TypeError):
         print("Unexpected Gemini response:", result)
+
         raise RuntimeError(
             "Gemini returned an unexpected response."
         )
