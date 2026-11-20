@@ -6,6 +6,8 @@ import html
 import random
 import base64
 from datetime import datetime, timezone
+import time
+from email.utils import parsedate_to_datetime
 
 import requests
 
@@ -27,7 +29,10 @@ HISTORY_FILE = "history.json"
 CURRENT_IMAGE_FILE = "current_image.json"
 
 HEADERS = {
-    "User-Agent": "ChristmasMomentsBot/1.0 (personal project)"
+    "User-Agent": (
+        "ChristmasMomentsBot/1.0 "
+        "(https://katissa2004.github.io/christmas-moments/)"
+    )
 }
 
 SEARCH_QUERIES = [
@@ -39,7 +44,7 @@ SEARCH_QUERIES = [
     "Christmas market winter lights"
 ]
 
-MAX_CANDIDATES = 6
+MAX_CANDIDATES = 3
 
 
 # -----------------------------
@@ -179,29 +184,78 @@ def search_images(history):
 # DOWNLOAD IMAGE
 # -----------------------------
 
+
 def download_image(candidate):
-    response = requests.get(
-        candidate["image_url"],
-        headers=HEADERS,
-        timeout=30
-    )
-    response.raise_for_status()
+    url = candidate["image_url"]
 
-    content_type = response.headers.get(
-        "Content-Type", ""
-    ).split(";")[0].lower()
+    # Wikimedia recommends respecting Retry-After.
+    for attempt in range(2):
+        try:
+            response = requests.get(
+                url,
+                headers=HEADERS,
+                timeout=30
+            )
 
-    if content_type not in (
-        "image/jpeg",
-        "image/png",
-        "image/webp"
-    ):
-        raise ValueError("Unsupported image format")
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
 
-    if len(response.content) > 5_000_000:
-        raise ValueError("Image is too large")
+                if retry_after:
+                    try:
+                        wait = int(retry_after)
+                    except ValueError:
+                        try:
+                            retry_date = parsedate_to_datetime(retry_after)
+                            wait = max(
+                                0,
+                                int(
+                                    (retry_date - datetime.now(
+                                        retry_date.tzinfo
+                                    )).total_seconds()
+                                )
+                            )
+                        except (ValueError, TypeError):
+                            wait = 60
+                else:
+                    wait = 60
 
-    return response.content, content_type
+                print(f"Wikimedia rate limit. Retry after {wait}s.")
+
+                if attempt == 0 and wait <= 30:
+                    time.sleep(wait)
+                    continue
+
+                raise RuntimeError(
+                    f"Wikimedia rate limited us. "
+                    f"Please retry after {wait} seconds."
+                )
+
+            response.raise_for_status()
+
+            content_type = response.headers.get(
+                "Content-Type", ""
+            ).split(";")[0].lower()
+
+            if content_type not in (
+                "image/jpeg",
+                "image/png",
+                "image/webp"
+            ):
+                raise ValueError("Unsupported image format")
+
+            if len(response.content) > 5_000_000:
+                raise ValueError("Image is too large")
+
+            return response.content, content_type
+
+        except requests.RequestException as error:
+            if attempt == 1:
+                raise RuntimeError(
+                    f"Could not download image: {error}"
+                ) from error
+
+            time.sleep(5)
+
 
 
 # -----------------------------
@@ -231,7 +285,10 @@ def select_with_ai(candidates, api_key):
     ]
 
     for index, candidate in enumerate(candidates, start=1):
-        image_bytes, mime_type = download_image(candidate)
+    if index > 1:
+        time.sleep(3)
+
+    image_bytes, mime_type = download_image(candidate)
 
         parts.append({
             "text": (
