@@ -14,7 +14,7 @@ import requests
 # SETTINGS
 # -----------------------------
 
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-3.8-flash"
 
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 
@@ -263,16 +263,17 @@ def select_with_ai(candidates, api_key):
     }
 
     response = requests.post(
-        GEMINI_API,
-        params={"key": api_key},
-        json=payload,
-        timeout=90
-    )
+    GEMINI_API,
+    headers={"x-goog-api-key": api_key},
+    json=payload,
+    timeout=90
+)
 
-    if not response.ok:
-        raise RuntimeError(
-            f"Gemini API error: HTTP {response.status_code}"
-        )
+if not response.ok:
+    print("Gemini error details:", response.text[:2000])
+    raise RuntimeError(
+        f"Gemini API error: HTTP {response.status_code}"
+    )
 
     result = response.json()
 
