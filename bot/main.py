@@ -5,8 +5,9 @@ import json
 import html
 import random
 import base64
-from datetime import datetime, timezone
 import time
+
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 import requests
@@ -64,7 +65,12 @@ def load_history():
 
 def save_history(history):
     with open(HISTORY_FILE, "w", encoding="utf-8") as file:
-        json.dump(history[-200:], file, ensure_ascii=False, indent=2)
+        json.dump(
+            history[-200:],
+            file,
+            ensure_ascii=False,
+            indent=2
+        )
 
 
 # -----------------------------
@@ -108,9 +114,12 @@ def search_images(history):
             headers=HEADERS,
             timeout=30
         )
+
         response.raise_for_status()
 
-        pages = response.json().get("query", {}).get("pages", {})
+        pages = response.json().get(
+            "query", {}
+        ).get("pages", {})
 
         if isinstance(pages, dict):
             pages = list(pages.values())
@@ -151,7 +160,9 @@ def search_images(history):
                 "image_url": image_url,
                 "source_url": file_page,
                 "description": clean_metadata(
-                    metadata.get("ImageDescription", {}).get("value", "")
+                    metadata.get(
+                        "ImageDescription", {}
+                    ).get("value", "")
                 ),
                 "author": clean_metadata(
                     metadata.get("Artist", {}).get("value", "")
@@ -160,7 +171,9 @@ def search_images(history):
                     metadata.get("Credit", {}).get("value", "")
                 ),
                 "license": clean_metadata(
-                    metadata.get("LicenseShortName", {}).get("value", "")
+                    metadata.get(
+                        "LicenseShortName", {}
+                    ).get("value", "")
                 ),
                 "license_url": clean_metadata(
                     metadata.get("LicenseUrl", {}).get("value", "")
@@ -184,11 +197,9 @@ def search_images(history):
 # DOWNLOAD IMAGE
 # -----------------------------
 
-
 def download_image(candidate):
     url = candidate["image_url"]
 
-    # Wikimedia recommends respecting Retry-After.
     for attempt in range(2):
         try:
             response = requests.get(
@@ -205,13 +216,18 @@ def download_image(candidate):
                         wait = int(retry_after)
                     except ValueError:
                         try:
-                            retry_date = parsedate_to_datetime(retry_after)
+                            retry_date = parsedate_to_datetime(
+                                retry_after
+                            )
+
                             wait = max(
                                 0,
                                 int(
-                                    (retry_date - datetime.now(
-                                        retry_date.tzinfo
-                                    )).total_seconds()
+                                    (
+                                        retry_date - datetime.now(
+                                            retry_date.tzinfo
+                                        )
+                                    ).total_seconds()
                                 )
                             )
                         except (ValueError, TypeError):
@@ -219,7 +235,9 @@ def download_image(candidate):
                 else:
                     wait = 60
 
-                print(f"Wikimedia rate limit. Retry after {wait}s.")
+                print(
+                    f"Wikimedia rate limit. Retry after {wait}s."
+                )
 
                 if attempt == 0 and wait <= 30:
                     time.sleep(wait)
@@ -257,22 +275,26 @@ def download_image(candidate):
             time.sleep(5)
 
 
-
 # -----------------------------
 # GEMINI SELECTION
 # -----------------------------
 
-
 def select_with_ai(candidates, api_key):
+
     parts = [
         {
             "text": (
                 "You are an art director selecting beautiful Christmas "
                 "photographs for a public Christmas-themed website.\n"
-                "Choose exactly ONE image.\n"
-                "Prioritize beautiful composition, Christmas atmosphere, "
-                "warm lights, snow and festive decorations.\n"
-                "Reject unrelated images, logos and screenshots.\n"
+                "Choose exactly ONE image.\n\n"
+                "Prioritize:\n"
+                "- beautiful and atmospheric composition;\n"
+                "- genuine Christmas or winter holiday mood;\n"
+                "- warm lights, snow and festive decorations;\n"
+                "- cozy scenes and magical winter landscapes;\n"
+                "- high visual quality.\n\n"
+                "Reject unrelated images, screenshots, logos, "
+                "watermarks and images with prominent text.\n\n"
                 "Return ONLY the number of your chosen image."
             )
         }
@@ -293,7 +315,7 @@ def select_with_ai(candidates, api_key):
 
             parts.append({
                 "text": (
-                    f"Image {number}: {candidate['title']}\n"
+                    f"\nImage {number}: {candidate['title']}\n"
                     f"Description: {candidate['description'][:400]}"
                 )
             })
@@ -326,65 +348,95 @@ def select_with_ai(candidates, api_key):
             }
         ],
         "generationConfig": {
-            "temperature": 0.2,
             "maxOutputTokens": 30
         }
     }
 
     response = requests.post(
         GEMINI_API,
-        headers={"x-goog-api-key": api_key},
+        headers={
+            "x-goog-api-key": api_key,
+            "Content-Type": "application/json"
+        },
         json=payload,
         timeout=90
     )
 
     if not response.ok:
-        print("Gemini error details:", response.text[:2000])
+        print("Gemini request URL:", GEMINI_API)
+        print("Gemini error details:", response.text[:4000])
+
         raise RuntimeError(
             f"Gemini API error: HTTP {response.status_code}"
         )
 
     result = response.json()
 
-    answer = result["candidates"][0]["content"]["parts"][0]["text"]
+    try:
+        answer = (
+            result["candidates"][0]
+            ["content"]["parts"][0]["text"]
+        )
+    except (KeyError, IndexError, TypeError):
+        print("Unexpected Gemini response:", result)
+        raise RuntimeError(
+            "Gemini returned an unexpected response."
+        )
 
     print("Gemini answer:", answer)
 
     match = re.search(r"\b([1-9]\d*)\b", answer)
 
     if not match:
-        raise ValueError("Gemini returned an invalid selection")
+        raise ValueError(
+            "Gemini returned an invalid selection."
+        )
 
     selected_index = int(match.group(1)) - 1
 
     if selected_index >= len(downloaded_candidates):
-        raise ValueError("Selected image does not exist")
+        raise ValueError(
+            "Gemini selected an image that does not exist."
+        )
 
     return downloaded_candidates[selected_index]
+
 
 # -----------------------------
 # MAIN
 # -----------------------------
 
 def main():
+
     api_key = os.environ.get("GEMINI_API_KEY")
 
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is missing")
+        raise RuntimeError(
+            "GEMINI_API_KEY is missing."
+        )
 
     history = load_history()
 
     candidates = search_images(history)
 
     if not candidates:
-        raise RuntimeError("No suitable images found")
+        raise RuntimeError(
+            "No suitable images found."
+        )
 
-    selected = select_with_ai(candidates, api_key)
+    selected = select_with_ai(
+        candidates,
+        api_key
+    )
 
     result = {
         "image_url": selected["image_url"],
-        "description": selected["description"] or selected["title"],
-        "author": selected["author"] or selected["credit"] or "Unknown",
+        "description": (
+            selected["description"] or selected["title"]
+        ),
+        "author": (
+            selected["author"] or selected["credit"] or "Unknown"
+        ),
         "license": selected["license"],
         "license_url": selected["license_url"],
         "source_url": selected["source_url"],
@@ -396,7 +448,12 @@ def main():
         "w",
         encoding="utf-8"
     ) as file:
-        json.dump(result, file, ensure_ascii=False, indent=2)
+        json.dump(
+            result,
+            file,
+            ensure_ascii=False,
+            indent=2
+        )
 
     history.append(selected["title"])
     save_history(history)
