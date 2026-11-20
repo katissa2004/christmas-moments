@@ -262,49 +262,61 @@ def download_image(candidate):
 # GEMINI SELECTION
 # -----------------------------
 
+
 def select_with_ai(candidates, api_key):
     parts = [
         {
             "text": (
                 "You are an art director selecting beautiful Christmas "
                 "photographs for a public Christmas-themed website.\n"
-                "Look at all the images and choose exactly ONE.\n\n"
-                "Prioritize:\n"
-                "- beautiful and atmospheric composition;\n"
-                "- genuine Christmas or winter holiday mood;\n"
-                "- warm lights, snow, decorations, cozy scenes or "
-                "magical winter landscapes;\n"
-                "- high visual quality;\n"
-                "- variety compared with ordinary Christmas stock photos.\n\n"
-                "Reject unrelated images, screenshots, logos, "
-                "watermarks and images with prominent text.\n\n"
-                "Return ONLY the number of your chosen image. "
-                "No explanation."
+                "Choose exactly ONE image.\n"
+                "Prioritize beautiful composition, Christmas atmosphere, "
+                "warm lights, snow and festive decorations.\n"
+                "Reject unrelated images, logos and screenshots.\n"
+                "Return ONLY the number of your chosen image."
             )
         }
     ]
 
-    for index, candidate in enumerate(candidates, start=1):
-    if index > 1:
-        time.sleep(3)
+    downloaded_candidates = []
 
-    image_bytes, mime_type = download_image(candidate)
+    for candidate in candidates:
+        try:
+            if downloaded_candidates:
+                time.sleep(3)
 
-        parts.append({
-            "text": (
-                f"\nImage {index}: {candidate['title']}\n"
-                f"Description: {candidate['description'][:400]}"
+            image_bytes, mime_type = download_image(candidate)
+
+            downloaded_candidates.append(candidate)
+
+            number = len(downloaded_candidates)
+
+            parts.append({
+                "text": (
+                    f"Image {number}: {candidate['title']}\n"
+                    f"Description: {candidate['description'][:400]}"
+                )
+            })
+
+            parts.append({
+                "inline_data": {
+                    "mime_type": mime_type,
+                    "data": base64.b64encode(
+                        image_bytes
+                    ).decode("utf-8")
+                }
+            })
+
+        except Exception as error:
+            print(
+                f"Skipping unavailable image "
+                f"{candidate['title']}: {error}"
             )
-        })
 
-        parts.append({
-            "inline_data": {
-                "mime_type": mime_type,
-                "data": base64.b64encode(
-                    image_bytes
-                ).decode("utf-8")
-            }
-        })
+    if not downloaded_candidates:
+        raise RuntimeError(
+            "Could not download any candidate images."
+        )
 
     payload = {
         "contents": [
@@ -320,17 +332,17 @@ def select_with_ai(candidates, api_key):
     }
 
     response = requests.post(
-    GEMINI_API,
-    headers={"x-goog-api-key": api_key},
-    json=payload,
-    timeout=90
-)
-
-if not response.ok:
-    print("Gemini error details:", response.text[:2000])
-    raise RuntimeError(
-        f"Gemini API error: HTTP {response.status_code}"
+        GEMINI_API,
+        headers={"x-goog-api-key": api_key},
+        json=payload,
+        timeout=90
     )
+
+    if not response.ok:
+        print("Gemini error details:", response.text[:2000])
+        raise RuntimeError(
+            f"Gemini API error: HTTP {response.status_code}"
+        )
 
     result = response.json()
 
@@ -338,18 +350,17 @@ if not response.ok:
 
     print("Gemini answer:", answer)
 
-    match = re.search(r"\b([1-6])\b", answer)
+    match = re.search(r"\b([1-9]\d*)\b", answer)
 
     if not match:
         raise ValueError("Gemini returned an invalid selection")
 
     selected_index = int(match.group(1)) - 1
 
-    if selected_index >= len(candidates):
+    if selected_index >= len(downloaded_candidates):
         raise ValueError("Selected image does not exist")
 
-    return candidates[selected_index]
-
+    return downloaded_candidates[selected_index]
 
 # -----------------------------
 # MAIN
